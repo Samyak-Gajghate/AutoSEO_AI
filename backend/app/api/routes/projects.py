@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from app.core.security import get_current_user
 from app.core.rate_limiter import limiter, STANDARD_LIMIT, GENERATION_LIMIT
 from app.core.token_budget import enforce_budget
@@ -165,6 +166,7 @@ async def get_authority_score(user: dict = Depends(get_current_user)):
     return AuthorityScoreResponse(user_id=user["uid"], clusters=clusters)
 
 
+
 # ── Token Usage ───────────────────────────────────────────────────────────────
 
 @router.get("/usage", response_model=TokenUsageSummary)
@@ -172,3 +174,42 @@ async def get_usage_summary(user: dict = Depends(get_current_user)):
     from app.utils.token_tracker import get_monthly_summary
     summary = await get_monthly_summary(user["uid"])
     return TokenUsageSummary(**summary)
+
+
+# ── Iterative Optimization ────────────────────────────────────────────────────
+
+class OptimizeRequest(BaseModel):
+    target: str = "full"           # outline | article | full | score
+    custom_instructions: str = ""  # optional extra prompt context
+
+
+@router.post("/projects/{project_id}/optimize")
+async def optimize_content(
+    project_id: str,
+    body: OptimizeRequest,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Re-generates selected parts of an existing project without rerunning SERP.
+
+    targets:
+      - outline  → new outline only (uses cached SERP)
+      - article  → new article from existing outline
+      - full     → new outline + new article
+      - score    → re-score without regeneration
+    """
+    await enforce_budget(user["uid"], "article")
+    db = get_db()
+    doc = await db.collection("projects").document(project_id).get()
+    if not doc.exists or doc.to_dict().get("user_id") != user["uid"]:
+        raise HTTPException(404, "Project not found.")
+
+    from app.services.optimize_service import optimize_content as _optimize
+    result = await _optimize(
+        uid=user["uid"],
+        project_id=project_id,
+        target=body.target,  # type: ignore[arg-type]
+        custom_instructions=body.custom_instructions,
+    )
+    return result
+

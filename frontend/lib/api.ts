@@ -45,6 +45,20 @@ export const runPipeline = (id: string) =>
 export const analyzeGap = (projectId: string) =>
     request<any>(`/projects/${projectId}/analyze-gap`, { method: "POST" });
 
+// ── Iterative Optimization ────────────────────────────────────────────────────
+
+export const optimizeContent = (
+    projectId: string,
+    target: "outline" | "article" | "full" | "score",
+    custom_instructions = ""
+) =>
+    request<any>(`/projects/${projectId}/optimize`, {
+        method: "POST",
+        body: JSON.stringify({ target, custom_instructions }),
+    });
+
+
+
 // ── AI-Assisted Editing ───────────────────────────────────────────────────────
 
 export const suggestEdit = (
